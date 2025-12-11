@@ -5,11 +5,11 @@
 portfolio:
   - code: "147970"
     name: "TIGER 모멘텀"
-    portion: 0.10  # 10%
+    portion: 0.20  # 10%
 
   - code: "372330"
     name: "KODEX 차이나항셍테크"
-    portion: 0.10  # 10%
+    portion: 0.20  # 10%
 
   - code: "426020"
     name: "TIMEFOLIO 미국S&P500액티브"

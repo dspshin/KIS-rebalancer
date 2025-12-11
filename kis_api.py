@@ -117,3 +117,167 @@ class KISClient:
         res = requests.get(url, headers=headers, params=params)
         res.raise_for_status()
         return res.json()
+
+    def get_asking_price(self, code):
+        """
+        Fetch asking price (hoga) to get the best bid/ask.
+        TR_ID: FHKST01010200 (Real/Virtual same usually, but check)
+        """
+        if not self.access_token:
+            self.get_access_token()
+
+        path = "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn"
+        url = f"{self.base_url}{path}"
+        
+        # This TR_ID is for Quotations, usually same for Real/Virtual or FHKST01010200
+        tr_id = "FHKST01010200"
+
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret,
+            "tr_id": tr_id,
+            "custtype": "P"
+        }
+        
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J", # Stock Market
+            "FID_INPUT_ISCD": code
+        }
+        
+        res = requests.get(url, headers=headers, params=params)
+        res.raise_for_status()
+        return res.json()
+
+    def get_open_orders(self):
+        """
+        Fetch open (unexecuted) orders.
+        Attempts Standard `TTTC8436R` first.
+        If that fails with Service Code Error (Pension Account), tries `TTTC8430R` or `CTSC9115R` placeholders if known.
+        Currently focusing on TTTC8436R (Revocable) -> TTTC8430R (Daily) -> Return Error.
+        """
+        if not self.access_token:
+            self.get_access_token()
+
+        # Strategy 1: Revocable Orders (TTTC8436R) - Best for Unexecuted
+        path = "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
+        url = f"{self.base_url}{path}"
+        tr_id = "VTTC8436R" if "openapivts" in self.base_url else "TTTC8436R"
+
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret,
+            "tr_id": tr_id
+        }
+        
+        params = {
+            "CANO": self.cano,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": "",
+            "INQR_DVSN_1": "0", 
+            "INQR_DVSN_2": "0"
+        }
+        
+        res = requests.get(url, headers=headers, params=params)
+        data = res.json()
+        
+        # Check for Service Code Error (OPSQ0002) - Account Type Mismatch
+        if data.get('rt_cd') != '0' and data.get('msg_cd') == 'OPSQ0002':
+            # Strategy 2: Pension Account Fallback
+            # Path: /uapi/domestic-stock/v1/trading/pension/inquire-daily-ccld
+            # TR_ID: TTTC2201R (KRX) or TTTC2210R (KRX+SOR)
+            
+            path2 = "/uapi/domestic-stock/v1/trading/pension/inquire-daily-ccld"
+            url2 = f"{self.base_url}{path2}"
+            tr_id2 = "VTTC2201R" if "openapivts" in self.base_url else "TTTC2201R"
+            
+            headers2 = headers.copy()
+            headers2['tr_id'] = tr_id2
+            
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            today = now.strftime("%Y%m%d")
+            # Search back 30 days for unexecuted orders
+            start_dt = (now - timedelta(days=30)).strftime("%Y%m%d")
+            
+            # Params for Daily Conclusion (similar to TTTC8430R)
+            params2 = {
+                "CANO": self.cano,
+                "ACNT_PRDT_CD": self.acnt_prdt_cd,
+                "INQR_STRT_DT": start_dt,
+                "INQR_END_DT": today,
+                "SLL_BUY_DVSN_CD": "00", # All
+                "INQR_DVSN": "00",       # Order No Asc
+                "PDNO": "",
+                "CCLD_DVSN": "02",       # 02: Unexecuted Only
+                "ORD_GNO_BRNO": "",
+                "PCOD": "",
+                "INQR_DVSN_3": "00",
+                "INQR_DVSN_1": "",
+                "CTX_AREA_FK100": "",
+                "CTX_AREA_NK100": "",
+                "USER_DVSN_CD": "01",    # Required for Pension: 01 (Personal)
+                "CCLD_NCCS_DVSN": "02"   # 01: Concluded, 02: Unconcluded (Unexecuted)
+            }
+            
+            # Remove Revocable-specific params that might conflict? 
+            # Requests.get(params=...) handles new dict.
+            
+            try:
+                res2 = requests.get(url2, headers=headers2, params=params2)
+                data2 = res2.json()
+                if data2.get('rt_cd') == '0':
+                    return data2
+                else:
+                    # If this also fails, return original error or second error?
+                    # Let's return second error to see what happened.
+                    return data2
+            except Exception:
+                # If network error on fallback, return original
+                return data
+
+        return data
+
+    def place_order(self, code, qty, price, order_type="BUY"):
+        """
+        Place a cash order (Buy/Sell).
+        order_type: "BUY" or "SELL"
+        """
+        if not self.access_token:
+            self.get_access_token()
+
+        path = "/uapi/domestic-stock/v1/trading/order-cash"
+        url = f"{self.base_url}{path}"
+        
+        # Determine TR_ID
+        is_virtual = "openapivts" in self.base_url
+        if order_type == "BUY":
+            tr_id = "VTTC0802U" if is_virtual else "TTTC0802U"
+        else: # SELL
+            tr_id = "VTTC0801U" if is_virtual else "TTTC0801U"
+
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret,
+            "tr_id": tr_id,
+            "custtype": "P"
+        }
+        
+        body = {
+            "CANO": self.cano,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "PDNO": code,
+            "ORD_DVSN": "00", # 00: Limit Order (지정가)
+            "ORD_QTY": str(qty),
+            "ORD_UNPR": str(price)
+        }
+        
+        res = requests.post(url, headers=headers, data=json.dumps(body))
+        res.raise_for_status()
+        return res.json()
