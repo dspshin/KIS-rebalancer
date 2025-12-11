@@ -1,0 +1,119 @@
+import requests
+import json
+from config import Config
+
+class KISClient:
+    def __init__(self):
+        Config.validate()
+        self.base_url = Config.URL_BASE
+        self.app_key = Config.APP_KEY
+        self.app_secret = Config.APP_SECRET
+        self.cano = Config.CANO
+        self.acnt_prdt_cd = Config.ACNT_PRDT_CD
+        self.token_file = "token.json"
+        self.access_token = self._load_token()
+
+    def _load_token(self):
+        """Load token from local file if it exists and is valid."""
+        import time
+        try:
+            with open(self.token_file, 'r') as f:
+                data = json.load(f)
+                # Check actual expiry (stored as timestamp)
+                # KIS tokens last 24 hours. We'll add a buffer.
+                if data.get('expires_at', 0) > time.time() + 60:
+                    return data['access_token']
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        return None
+
+    def _save_token(self, token, expires_in):
+        """Save token to local file."""
+        import time
+        with open(self.token_file, 'w') as f:
+            json.dump({
+                'access_token': token,
+                'expires_at': time.time() + expires_in
+            }, f)
+
+    def get_access_token(self):
+        """
+        Get OAuth access token.
+        Reuse cached token if available.
+        """
+        if self.access_token:
+            return self.access_token
+
+        path = "/oauth2/tokenP"
+        url =f"{self.base_url}{path}"
+        
+        headers = {
+            "content-type": "application/json"
+        }
+        body = {
+            "grant_type": "client_credentials",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret
+        }
+        
+        try:
+            res = requests.post(url, headers=headers, data=json.dumps(body))
+            res.raise_for_status()
+            data = res.json()
+            self.access_token = data['access_token']
+            # Default to 24 hours (86400 seconds) if expires_in is missing or slightly different
+            expires_in = int(data.get('expires_in', 86400))
+            self._save_token(self.access_token, expires_in)
+            return self.access_token
+        except Exception as e:
+            print(f"Error getting access token: {e}")
+            raise
+
+    def get_balance(self):
+        """
+        Fetch account balance.
+        Using domestic stock balance inquiry (TTTC8434R).
+        """
+        if not self.access_token:
+            self.get_access_token()
+
+        path = "/uapi/domestic-stock/v1/trading/inquire-balance"
+        url = f"{self.base_url}{path}"
+        
+        # TR_ID might differ for Virtual vs Real
+        # Real: TTTC8434R
+        # Virtual: VTTC8434R
+        # We can loosely infer from domain or config. 
+        # For safety, let's guess based on URL or just use a config/constant. 
+        # But commonly TTTC8434R is for verify (real) and VTTC8434R (virtual).
+        # Let's assume Real for now based on typical user request, but handle distinction if possible.
+        # Actually, let's make it configurable or robust.
+        tr_id = "TTTC8434R"
+        if "openapivts" in self.base_url:
+            tr_id = "VTTC8434R"
+
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret,
+            "tr_id": tr_id
+        }
+        
+        params = {
+            "CANO": self.cano,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "AFHR_FLPR_YN": "N",
+            "OFL_YN": "N",
+            "INQR_DVSN": "02",
+            "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "01",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": ""
+        }
+        
+        res = requests.get(url, headers=headers, params=params)
+        res.raise_for_status()
+        return res.json()
