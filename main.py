@@ -272,43 +272,38 @@ def main():
             rt_cd = open_orders_data.get('rt_cd')
             msg_cd = open_orders_data.get('msg_cd')
             
-            if rt_cd != '0':
-                if msg_cd == 'OPSQ0002':
-                     # Even fallback failed
-                    print(f"[Open Orders] : Not Supported/Found (Error {msg_cd})")
-                else:
-                    print(f"[Open Orders] : Error {msg_cd} - {open_orders_data.get('msg1')}")
+            # Extract list depending on structure
+            open_orders = open_orders_data.get('output1') or open_orders_data.get('output', [])
+            
+            if not open_orders:
+                print("[Open Orders] : None (Note: Pension/ISA accounts may not show Reservation Orders via API)")
             else:
-                open_orders = open_orders_data.get('output1') or open_orders_data.get('output', [])
-                if open_orders:
-                    print("[Open Orders]")
-                    orders_data = []
-                    for order in open_orders:
-                        # Handle multiple APIs:
-                        # TTTC8436R (Revocable) -> psbl_qty
-                        # TTTC2201R (Daily) -> rmn_qty
-                        
-                        # Try psbl_qty first, then rmn_qty
-                        rem_qty = order.get('psbl_qty')
-                        if not rem_qty or int(rem_qty) == 0:
-                            rem_qty = order.get('rmn_qty', 0)
-                            
-                        tot_qty = order.get('ord_qty', 0)
-                        
-                        qty_display = f"{int(rem_qty):,} / {int(tot_qty):,}"
-                        orders_data.append([
-                            order['pdno'],
-                            order['prdt_name'],
-                            order['sll_buy_dvsn_cd_name'],
-                            qty_display,
-                            f"{int(order['ord_unpr']):,}",
-                            order['ord_tmd']
-                        ])
+                print(f"[Open Orders] : {len(open_orders)} orders found")
+                orders_data = []
+                for order in open_orders:
+                    # Handle multiple APIs:
+                    # TTTC8436R (Revocable) -> psbl_qty
+                    # TTTC2201R (Daily) -> rmn_qty
                     
-                    headers = ["Code", "Name", "Type", "Unexecuted/Total", "Price", "Time"]
-                    print(tabulate(orders_data, headers=headers, tablefmt="pretty"))
-                else:
-                    print("[Open Orders] : None")
+                    # Try psbl_qty first, then rmn_qty
+                    rem_qty = order.get('psbl_qty')
+                    if not rem_qty or int(rem_qty) == 0:
+                        rem_qty = order.get('rmn_qty', 0)
+                        
+                    tot_qty = order.get('ord_qty', 0)
+                    
+                    qty_display = f"{int(rem_qty):,} / {int(tot_qty):,}"
+                    orders_data.append([
+                        order.get('pdno', 'N/A'),
+                        order.get('prdt_name', 'N/A'),
+                        order.get('sll_buy_dvsn_cd_name', 'Buy/Sell'),
+                        qty_display,
+                        f"{int(float(order.get('ord_unpr', 0))):,}",
+                        order.get('ord_tmd', '')
+                    ])
+                
+                headers = ["Code", "Name", "Type", "Unexecuted/Total", "Price", "Time"]
+                print(tabulate(orders_data, headers=headers, tablefmt="pretty"))
 
         except Exception as e:
             print(f"[Open Orders] : Failed to fetch ({str(e)})")

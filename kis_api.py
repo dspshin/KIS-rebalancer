@@ -184,13 +184,15 @@ class KISClient:
         
         res = requests.get(url, headers=headers, params=params)
         data = res.json()
+        print(f"[DEBUG] Strategy 1 (TTTC8436R) Result: rt_cd={data.get('rt_cd')}, msg_cd={data.get('msg_cd')}, msg1={data.get('msg1')}")
+        # print(f"[DEBUG] Full Data: {data}") # Comment in if needed
         
         # Check for Service Code Error (OPSQ0002) - Account Type Mismatch
         if data.get('rt_cd') != '0' and data.get('msg_cd') == 'OPSQ0002':
             # Strategy 2: Pension Account Fallback
+            # Strategy 2: Pension Account Fallback
             # Path: /uapi/domestic-stock/v1/trading/pension/inquire-daily-ccld
             # TR_ID: TTTC2201R (KRX) or TTTC2210R (KRX+SOR)
-            
             path2 = "/uapi/domestic-stock/v1/trading/pension/inquire-daily-ccld"
             url2 = f"{self.base_url}{path2}"
             tr_id2 = "VTTC2201R" if "openapivts" in self.base_url else "TTTC2201R"
@@ -201,43 +203,33 @@ class KISClient:
             from datetime import datetime, timedelta
             now = datetime.now()
             today = now.strftime("%Y%m%d")
-            # Search back 30 days for unexecuted orders
+            # Search back 30 days
             start_dt = (now - timedelta(days=30)).strftime("%Y%m%d")
             
-            # Params for Daily Conclusion (similar to TTTC8430R)
             params2 = {
                 "CANO": self.cano,
                 "ACNT_PRDT_CD": self.acnt_prdt_cd,
                 "INQR_STRT_DT": start_dt,
                 "INQR_END_DT": today,
                 "SLL_BUY_DVSN_CD": "00", # All
-                "INQR_DVSN": "00",       # Order No Asc
+                "INQR_DVSN": "00",       
                 "PDNO": "",
-                "CCLD_DVSN": "02",       # 02: Unexecuted Only
+                # "CCLD_DVSN": "02",
                 "ORD_GNO_BRNO": "",
                 "PCOD": "",
                 "INQR_DVSN_3": "00",
                 "INQR_DVSN_1": "",
                 "CTX_AREA_FK100": "",
                 "CTX_AREA_NK100": "",
-                "USER_DVSN_CD": "01",    # Required for Pension: 01 (Personal)
-                "CCLD_NCCS_DVSN": "02"   # 01: Concluded, 02: Unconcluded (Unexecuted)
+                "USER_DVSN_CD": "01",
+                "CCLD_NCCS_DVSN": "02"   # 02: Unexecuted Only
             }
-            
-            # Remove Revocable-specific params that might conflict? 
-            # Requests.get(params=...) handles new dict.
             
             try:
                 res2 = requests.get(url2, headers=headers2, params=params2)
                 data2 = res2.json()
-                if data2.get('rt_cd') == '0':
-                    return data2
-                else:
-                    # If this also fails, return original error or second error?
-                    # Let's return second error to see what happened.
-                    return data2
+                return data2
             except Exception:
-                # If network error on fallback, return original
                 return data
 
         return data
