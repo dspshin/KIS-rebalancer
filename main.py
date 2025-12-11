@@ -2,6 +2,9 @@ import requests
 import json
 import yaml
 import os
+import glob
+import sys
+from dotenv import load_dotenv, dotenv_values
 from kis_api import KISClient
 from tabulate import tabulate
 
@@ -15,12 +18,110 @@ def load_portfolio(filepath="portfolio.yaml"):
         data = yaml.safe_load(f)
     return data.get('portfolio', [])
 
+def select_portfolio_file(args):
+    """
+    Select portfolio file based on args or interactive prompt.
+    """
+    if args.portfolio:
+        if os.path.exists(args.portfolio):
+            return args.portfolio
+        else:
+            raise ValueError(f"Portfolio file not found: {args.portfolio}")
+    
+    # Scan for portfolio*.yaml
+    files = sorted(glob.glob("portfolio*.yaml"))
+    
+    if not files:
+        # Fallback to default if no file matches pattern but portfolio.yaml exists (covered by glob usually)
+        if os.path.exists("portfolio.yaml"):
+            return "portfolio.yaml"
+        raise ValueError("No portfolio*.yaml files found.")
+        
+    if len(files) == 1:
+        return files[0]
+        
+    # Interactive Selection
+    print("\n[Select Portfolio]")
+    for idx, f in enumerate(files):
+        print(f"{idx + 1}. {f}")
+        
+    while True:
+        try:
+            choice = input(f"Enter number (1-{len(files)}): ")
+            idx = int(choice) - 1
+            if 0 <= idx < len(files):
+                return files[idx]
+            else:
+                print("Invalid number.")
+        except ValueError:
+            print("Invalid input.")
+
+def load_portfolio_config(filepath):
+    """
+    Load 'config' section from portfolio yaml and merge with .env
+    """
+    if not os.path.exists(filepath):
+        return None
+        
+    with open(filepath, 'r') as f:
+        data = yaml.safe_load(f)
+        
+    config = data.get('config', {})
+    if not config:
+        return None
+        
+    # Base credentials from current environment (already loaded by load_dotenv in config.py or main)
+    # Actually KISClient loads Config from env.
+    # We want to Construct a merged dictionary.
+    
+    # 1. Start with global env
+    final_creds = {
+        "APP_KEY": os.getenv("APP_KEY"),
+        "APP_SECRET": os.getenv("APP_SECRET"),
+        "CANO": os.getenv("CANO"),
+        "ACNT_PRDT_CD": os.getenv("ACNT_PRDT_CD"),
+        "URL_BASE": os.getenv("URL_BASE", "https://openapi.koreainvestment.com:9443")
+    }
+    
+    # 2. If config has 'env_file', load it
+    env_file = config.get('env_file')
+    if env_file and os.path.exists(env_file):
+        print(f"Loading env from {env_file}...")
+        env_vars = dotenv_values(env_file)
+        final_creds.update(env_vars)
+        
+    # 3. Direct Overrides from yaml
+    if 'cano' in config:
+        final_creds['CANO'] = str(config['cano'])
+    if 'acnt_prdt_cd' in config:
+        final_creds['ACNT_PRDT_CD'] = str(config['acnt_prdt_cd'])
+    if 'app_key' in config: # Allow key override too
+        final_creds['APP_KEY'] = str(config['app_key'])
+    if 'app_secret' in config:    
+        final_creds['APP_SECRET'] = str(config['app_secret'])
+        
+    return final_creds
+
 def main():
     parser = argparse.ArgumentParser(description="KIS Rebalancer")
     parser.add_argument("--buy", action="store_true", help="Enable Buy execution")
     parser.add_argument("--sell", action="store_true", help="Enable Sell execution")
     parser.add_argument("--mode", choices=['split', 'market'], default='split', help="Execution mode: split (3-step) or market (100%% current price)")
+    parser.add_argument("--portfolio", type=str, help="Path to portfolio yaml file")
     args = parser.parse_args()
+
+    # 1. Select Portfolio File
+    try:
+        portfolio_file = select_portfolio_file(args)
+        print(f"Selected Portfolio: {portfolio_file}")
+    except ValueError as e:
+        print(f"Error: {e}")
+        return
+
+    # 2. Load Portfolio Config (Account Override)
+    credentials = load_portfolio_config(portfolio_file)
+    if credentials:
+        print(f"Loaded Account Config for: {credentials.get('CANO', 'Unknown')}")
 
 
 
@@ -34,7 +135,7 @@ def main():
     else:
         print("--- Simulation Mode (No Orders) ---")      
     try:
-        client = KISClient()
+        client = KISClient(credentials)
         print("Authenticating...")
         client.get_access_token()
         
@@ -112,7 +213,7 @@ def main():
             print(tabulate(table_data, headers=headers, tablefmt="pretty"))
 
         # Rebalancing Logic
-        targets = load_portfolio()
+        targets = load_portfolio(portfolio_file)
         if targets:
             print("\n[Rebalancing Plan]")
             plan_data = []

@@ -13,10 +13,12 @@ env/
 .env.local
 
 # Token Cache (Sensitive)
-token.json
+# Token Cache & Data (Sensitive)
+*.json
 
 # User Portfolio (Personal)
-portfolio.yaml
+# User Portfolio & Config
+*.yaml
 
 # Distribution / Packaging
 build/

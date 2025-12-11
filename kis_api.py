@@ -3,14 +3,25 @@ import json
 from config import Config
 
 class KISClient:
-    def __init__(self):
-        Config.validate()
-        self.base_url = Config.URL_BASE
-        self.app_key = Config.APP_KEY
-        self.app_secret = Config.APP_SECRET
-        self.cano = Config.CANO
-        self.acnt_prdt_cd = Config.ACNT_PRDT_CD
-        self.token_file = "token.json"
+    def __init__(self, credentials=None):
+        if credentials:
+            self.app_key = credentials.get("APP_KEY")
+            self.app_secret = credentials.get("APP_SECRET")
+            self.cano = credentials.get("CANO")
+            self.acnt_prdt_cd = credentials.get("ACNT_PRDT_CD")
+            self.base_url = credentials.get("URL_BASE", Config.URL_BASE)
+        else:
+            Config.validate()
+            self.base_url = Config.URL_BASE
+            self.app_key = Config.APP_KEY
+            self.app_secret = Config.APP_SECRET
+            self.cano = Config.CANO
+            self.acnt_prdt_cd = Config.ACNT_PRDT_CD
+            
+        # Token file based on AppKey Hash/Prefix to allow sharing across portfolios with same key
+        # but separate for different keys.
+        key_prefix = self.app_key[:6] if self.app_key else "unknown"
+        self.token_file = f"token_{key_prefix}.json"
         self.access_token = self._load_token()
 
     def _load_token(self):
