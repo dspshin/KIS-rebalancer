@@ -17,13 +17,22 @@ def load_portfolio(filepath="portfolio.yaml"):
 
 def main():
     parser = argparse.ArgumentParser(description="KIS Rebalancer")
-    parser.add_argument("--trade", action="store_true", help="Execute trades (Splited Buy)")
-    parser.add_argument("--market-buy", action="store_true", help="Execute trades at current market price (100%% quantity)")
+    parser.add_argument("--buy", action="store_true", help="Enable Buy execution")
+    parser.add_argument("--sell", action="store_true", help="Enable Sell execution")
+    parser.add_argument("--mode", choices=['split', 'market'], default='split', help="Execution mode: split (3-step) or market (100%% current price)")
     args = parser.parse_args()
 
+
+
     print("Initializing KIS Rebalancer...")
-    if args.trade:
+    if args.buy or args.sell:
         print("!!! TRADING MODE ENABLED !!! Orders will be placed.")
+        if args.buy:
+            print(f" -> BUY Enabled (Mode: {args.mode})")
+        if args.sell:
+            print(f" -> SELL Enabled (Mode: {args.mode})")
+    else:
+        print("--- Simulation Mode (No Orders) ---")      
     try:
         client = KISClient()
         print("Authenticating...")
@@ -163,25 +172,28 @@ def main():
                         qty_diff = int(abs(diff) / cur_price)
                 
                 # Execution Logic
-                if diff > 0: # BUY
-                     if args.market_buy: # New Simple Trading: 100% at Current Price
-                         # Re-calculate qty based on Current Price (not Bid Price) to be precise? 
-                         # Default qty_diff checks bid_price.
-                         # Let's verify price to use. User said "Current Price" (stck_prpr).
-                         exec_price = cur_price
-                         if exec_price > 0:
-                             exec_qty = int(diff / exec_price)
-                             if exec_qty > 0:
-                                 print(f"  [EXEC] [Market-Buy] Buying {name} ({code}) {exec_qty} qty at {exec_price:,}...")
-                                 client.place_order(code, exec_qty, exec_price, "BUY")
-                         else:
-                             print(f"  [EXEC] [Market-Buy] Failed: Price is 0")
+                # Execution Logic
+                # BUY Execution
+                if diff > 0 and args.buy:
+                     # Get Current Price for Market Buy reference
+                    curr_prc = 0
+                    try:
+                        curr_prc = int(asking_output2.get('stck_prpr'))
+                    except (KeyError, ValueError, TypeError): 
+                        curr_prc = bid_price 
 
-                     elif args.trade: # Existing Split Trading
+                    if args.mode == 'market': # Market Price 100%
+                         buy_qty = int(diff / curr_prc) if curr_prc > 0 else 0
+                         if buy_qty > 0:
+                             print(f"  [EXEC] [Market-Buy] Buying {name} ({code}) {buy_qty} qty at Recent Price {curr_prc:,}...")
+                             client.place_order(code, buy_qty, curr_prc, "BUY")
+                         else:
+                             print(f"  [EXEC] [Market-Buy] Failed: Price or Qty is 0")
+                    
+                    elif args.mode == 'split': # Split Buy (33/33/34 at Bid 1/2/3)
                         if qty_diff > 0:
                             print(f"  [EXEC] [Split-Buy] Buying {name} ({code}) {qty_diff} qty...")
                             
-                            # Split Logic: 33% / 33% / 34%
                             q1 = int(qty_diff * 0.33)
                             q2 = int(qty_diff * 0.33)
                             q3 = qty_diff - q1 - q2
@@ -190,25 +202,51 @@ def main():
                             p2 = int(asking_output.get('bidp2', 0))
                             p3 = int(asking_output.get('bidp3', 0))
                             
-                            # Order 1 (Top Bid)
                             if q1 > 0 and p1 > 0:
                                 print(f"    -> Order 1: {q1} qty at {p1:,}")
                                 client.place_order(code, q1, p1, "BUY")
-                                
-                            # Order 2 (Bid 2)
                             if q2 > 0 and p2 > 0:
                                 print(f"    -> Order 2: {q2} qty at {p2:,}")
                                 client.place_order(code, q2, p2, "BUY")
-                                
-                            # Order 3 (Bid 3)
                             if q3 > 0 and p3 > 0:
                                 print(f"    -> Order 3: {q3} qty at {p3:,}")
                                 client.place_order(code, q3, p3, "BUY")
 
-                elif diff < 0 and (args.trade or args.market_buy): # SELL
-                    if qty_diff > 0:
-                        print(f"  [EXEC] Selling {name} ({code}) {qty_diff} qty at {est_price:,}...")
-                        client.place_order(code, qty_diff, est_price, "SELL")
+                # SELL Execution
+                elif diff < 0 and args.sell:
+                    curr_prc = 0
+                    try:
+                        curr_prc = int(asking_output2.get('stck_prpr'))
+                    except (KeyError, ValueError, TypeError): 
+                        curr_prc = ask_price # Fallback to Best Ask
+
+                    qty_sell = abs(qty_diff)
+
+                    if args.mode == 'market': # Market Sell 100%
+                        if qty_sell > 0:
+                            print(f"  [EXEC] [Market-Sell] Selling {name} ({code}) {qty_sell} qty at {curr_prc:,}...")
+                            client.place_order(code, qty_sell, curr_prc, "SELL")
+                    
+                    elif args.mode == 'split': # Split Sell (33/33/34 at Ask 1/2/3)
+                        if qty_sell > 0:
+                             print(f"  [EXEC] [Split-Sell] Selling {name} ({code}) {qty_sell} qty...")
+                             q1 = int(qty_sell * 0.33)
+                             q2 = int(qty_sell * 0.33)
+                             q3 = qty_sell - q1 - q2
+                             
+                             p1 = ask_price # askp1
+                             p2 = int(asking_output.get('askp2', 0))
+                             p3 = int(asking_output.get('askp3', 0))
+
+                             if q1 > 0 and p1 > 0:
+                                print(f"    -> Order 1: {q1} qty at {p1:,}")
+                                client.place_order(code, q1, p1, "SELL")
+                             if q2 > 0 and p2 > 0:
+                                print(f"    -> Order 2: {q2} qty at {p2:,}")
+                                client.place_order(code, q2, p2, "SELL")
+                             if q3 > 0 and p3 > 0:
+                                print(f"    -> Order 3: {q3} qty at {p3:,}")
+                                client.place_order(code, q3, p3, "SELL")
 
                 plan_data.append([
                     code,
