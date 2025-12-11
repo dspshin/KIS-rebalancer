@@ -15,6 +15,9 @@ env/
 # Token Cache (Sensitive)
 token.json
 
+# User Portfolio (Personal)
+portfolio.yaml
+
 # Distribution / Packaging
 build/
 dist/
