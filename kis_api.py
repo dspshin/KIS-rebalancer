@@ -200,49 +200,61 @@ class KISClient:
         
         # Check for Service Code Error (OPSQ0002) - Account Type Mismatch
         if data.get('rt_cd') != '0' and data.get('msg_cd') == 'OPSQ0002':
+            print(f"[DEBUG] Attempting Strategy 2 (Pension/ISA API)...")
             # Strategy 2: Pension Account Fallback
-            # Strategy 2: Pension Account Fallback
-            # Path: /uapi/domestic-stock/v1/trading/pension/inquire-daily-ccld
-            # TR_ID: TTTC2201R (KRX) or TTTC2210R (KRX+SOR)
-            path2 = "/uapi/domestic-stock/v1/trading/pension/inquire-daily-ccld"
+            # Path: /uapi/domestic-stock/v1/trading/inquire-daily-ccld (General Daily) or similar? 
+            # NO, KIS API Doc: "주식 > 주문/체결 > [국내주식] 주식당일주문체결조회" is TTTC8001R (General).
+            # But the user mentioned Pension/ISA. 
+            # For Pension/ISA, often the General API works but sometimes fails.
+            # Let's try the "Inquire Daily Conclusion" (주식일별주문체결조회) which covers unexecuted.
+            
+            # Failed with OPSQ0002, trying Strategy 2 (TTTC8001R / VTTC8001R)
+            # Reference User's Example: "inquire_daily_ccld"
+            # Since we want unexecuted orders, we usually look at recent history (3 months inner).
+            # TR_ID for Real: TTTC8001R (pd_dv="inner"), CTSC9215R (pd_dv="before")
+            # TR_ID for Demo: VTTC8001R (pd_dv="inner"), VTSC9215R (pd_dv="before")
+            
+            # We assume "inner" (within 3 months) is sufficient for open orders.
+            path2 = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
             url2 = f"{self.base_url}{path2}"
-            tr_id2 = "VTTC2201R" if "openapivts" in self.base_url else "TTTC2201R"
+            is_virtual = "openapivts" in self.base_url
+            tr_id2 = "VTTC8001R" if is_virtual else "TTTC8001R"
             
             headers2 = headers.copy()
             headers2['tr_id'] = tr_id2
             
-            from datetime import datetime, timedelta
-            now = datetime.now()
-            today = now.strftime("%Y%m%d")
-            # Search back 30 days
-            start_dt = (now - timedelta(days=30)).strftime("%Y%m%d")
+            # Prepare params fully populated as per reference
+            from datetime import datetime
+            today = datetime.now().strftime("%Y%m%d")
             
             params2 = {
                 "CANO": self.cano,
                 "ACNT_PRDT_CD": self.acnt_prdt_cd,
-                "INQR_STRT_DT": start_dt,
-                "INQR_END_DT": today,
-                "SLL_BUY_DVSN_CD": "00", # All
-                "INQR_DVSN": "00",       
+                "INQR_STRT_DT": today,      # Start Date
+                "INQR_END_DT": today,       # End Date
+                "SLL_BUY_DVSN_CD": "00",    # 00:All
+                "INQR_DVSN": "00",          # 00:Reverse Order (Recent first)
                 "PDNO": "",
-                # "CCLD_DVSN": "02",
+                "CCLD_DVSN": "02",          # 02:Unexecuted Only
                 "ORD_GNO_BRNO": "",
-                "PCOD": "",
-                "INQR_DVSN_3": "00",
-                "INQR_DVSN_1": "",
+                "ODNO": "",
+                "INQR_DVSN_3": "00",        # 00:All 
+                "INQR_DVSN_1": "",          # None:All
                 "CTX_AREA_FK100": "",
-                "CTX_AREA_NK100": "",
-                "USER_DVSN_CD": "01",
-                "CCLD_NCCS_DVSN": "02"   # 02: Unexecuted Only
+                "CTX_AREA_NK100": ""
             }
+            
+            # Note: Pagination logic (tr_cont) is omitted for simplicity in this fallback, 
+            # assuming user doesn't have >100 OPEN orders in a single day.
             
             try:
                 res2 = requests.get(url2, headers=headers2, params=params2)
                 data2 = res2.json()
                 return data2
-            except Exception:
+            except Exception as e:
+                print(f"[DEBUG] Strategy 2 Failed: {e}")
                 return data
-
+        
         return data
 
     def place_order(self, code, qty, price, order_type="BUY"):
