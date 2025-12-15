@@ -218,6 +218,10 @@ def main():
             print("\n[Rebalancing Plan]")
             plan_data = []
             
+            # Lists to store execution plans
+            planned_buys = []
+            planned_sells = []
+            
             for target in targets:
                 code = str(target['code'])
                 name = target['name']
@@ -265,89 +269,34 @@ def main():
                         est_price = cur_price
                         qty_diff = int(diff / cur_price)
                         
+                    if qty_diff > 0:
+                        planned_buys.append({
+                            'code': code,
+                            'name': name,
+                            'qty': qty_diff,
+                            'price': est_price,
+                            'asking_output': asking_output, 
+                            'asking_output2': asking_output2,
+                            'bid_price': bid_price
+                        })
+                        
                 elif diff < 0:
                     action = "SELL"
                     # For selling, use current price (or could request logic later)
                     if cur_price > 0:
                         est_price = cur_price
                         qty_diff = int(abs(diff) / cur_price)
-                
-                # Execution Logic
-                # Execution Logic
-                # BUY Execution
-                if diff > 0 and args.buy:
-                     # Get Current Price for Market Buy reference
-                    curr_prc = 0
-                    try:
-                        curr_prc = int(asking_output2.get('stck_prpr'))
-                    except (KeyError, ValueError, TypeError): 
-                        curr_prc = bid_price 
-
-                    if args.mode == 'market': # Market Price 100%
-                         buy_qty = int(diff / curr_prc) if curr_prc > 0 else 0
-                         if buy_qty > 0:
-                             print(f"  [EXEC] [Market-Buy] Buying {name} ({code}) {buy_qty} qty at Recent Price {curr_prc:,}...")
-                             client.place_order(code, buy_qty, curr_prc, "BUY")
-                         else:
-                             print(f"  [EXEC] [Market-Buy] Failed: Price or Qty is 0")
                     
-                    elif args.mode == 'split': # Split Buy (33/33/34 at Bid 1/2/3)
-                        if qty_diff > 0:
-                            print(f"  [EXEC] [Split-Buy] Buying {name} ({code}) {qty_diff} qty...")
-                            
-                            q1 = int(qty_diff * 0.33)
-                            q2 = int(qty_diff * 0.33)
-                            q3 = qty_diff - q1 - q2
-                            
-                            p1 = bid_price # bidp1
-                            p2 = int(asking_output.get('bidp2', 0))
-                            p3 = int(asking_output.get('bidp3', 0))
-                            
-                            if q1 > 0 and p1 > 0:
-                                print(f"    -> Order 1: {q1} qty at {p1:,}")
-                                client.place_order(code, q1, p1, "BUY")
-                            if q2 > 0 and p2 > 0:
-                                print(f"    -> Order 2: {q2} qty at {p2:,}")
-                                client.place_order(code, q2, p2, "BUY")
-                            if q3 > 0 and p3 > 0:
-                                print(f"    -> Order 3: {q3} qty at {p3:,}")
-                                client.place_order(code, q3, p3, "BUY")
-
-                # SELL Execution
-                elif diff < 0 and args.sell:
-                    curr_prc = 0
-                    try:
-                        curr_prc = int(asking_output2.get('stck_prpr'))
-                    except (KeyError, ValueError, TypeError): 
-                        curr_prc = ask_price # Fallback to Best Ask
-
-                    qty_sell = abs(qty_diff)
-
-                    if args.mode == 'market': # Market Sell 100%
-                        if qty_sell > 0:
-                            print(f"  [EXEC] [Market-Sell] Selling {name} ({code}) {qty_sell} qty at {curr_prc:,}...")
-                            client.place_order(code, qty_sell, curr_prc, "SELL")
-                    
-                    elif args.mode == 'split': # Split Sell (33/33/34 at Ask 1/2/3)
-                        if qty_sell > 0:
-                             print(f"  [EXEC] [Split-Sell] Selling {name} ({code}) {qty_sell} qty...")
-                             q1 = int(qty_sell * 0.33)
-                             q2 = int(qty_sell * 0.33)
-                             q3 = qty_sell - q1 - q2
-                             
-                             p1 = ask_price # askp1
-                             p2 = int(asking_output.get('askp2', 0))
-                             p3 = int(asking_output.get('askp3', 0))
-
-                             if q1 > 0 and p1 > 0:
-                                print(f"    -> Order 1: {q1} qty at {p1:,}")
-                                client.place_order(code, q1, p1, "SELL")
-                             if q2 > 0 and p2 > 0:
-                                print(f"    -> Order 2: {q2} qty at {p2:,}")
-                                client.place_order(code, q2, p2, "SELL")
-                             if q3 > 0 and p3 > 0:
-                                print(f"    -> Order 3: {q3} qty at {p3:,}")
-                                client.place_order(code, q3, p3, "SELL")
+                    if qty_diff > 0:
+                        planned_sells.append({
+                            'code': code,
+                            'name': name,
+                            'qty': qty_diff,
+                            'price': est_price,
+                            'asking_output': asking_output,
+                            'asking_output2': asking_output2,
+                            'ask_price': ask_price
+                        })
 
                 plan_data.append([
                     code,
@@ -362,6 +311,158 @@ def main():
                 
             headers = ["Code", "Name", "Target %", "Target Amt", "Current Amt", "Diff", "Action", "Est. Qty (@ Price)"]
             print(tabulate(plan_data, headers=headers, tablefmt="pretty"))
+
+            # --- Execution Phase ---
+            if args.buy or args.sell:
+                print("\n[Execution Started]")
+                
+                # 0. Fetch Available Cash Once
+                current_cash = 0
+                try:
+                    current_cash = client.get_buyable_cash()
+                    print(f"Initial Orderable Cash: {current_cash:,} KRW")
+                except Exception as e:
+                    print(f"Warning: Failed to fetch orderable cash ({e}). execution might fail if funds insufficient.")
+                
+                # 1. Execute SELLS first (to free up cash)
+                if args.sell and planned_sells:
+                    print("\n--- Processing SELL Orders ---")
+                    for order in planned_sells:
+                        code = order['code']
+                        name = order['name']
+                        qty = order['qty']
+                        # price = order['price']
+                        ask_price = order['ask_price']
+                        asking_output = order['asking_output']
+                        asking_output2 = order['asking_output2']
+                        
+                        curr_prc = 0
+                        try:
+                            curr_prc = int(asking_output2.get('stck_prpr'))
+                        except (KeyError, ValueError, TypeError): 
+                            curr_prc = ask_price # Fallback to Best Ask
+
+                        if args.mode == 'market': # Market Sell 100%
+                             print(f"  [EXEC] [Market-Sell] Selling {name} ({code}) {qty} qty at {curr_prc:,}...")
+                             client.place_order(code, qty, curr_prc, "SELL")
+
+                        elif args.mode == 'split': # Split Sell (33/33/34 at Ask 1/2/3)
+                             print(f"  [EXEC] [Split-Sell] Selling {name} ({code}) {qty} qty...")
+                             q1 = int(qty * 0.33)
+                             q2 = int(qty * 0.33)
+                             q3 = qty - q1 - q2
+                             
+                             p1 = ask_price # askp1
+                             p2 = int(asking_output.get('askp2', 0))
+                             p3 = int(asking_output.get('askp3', 0))
+
+                             if q1 > 0 and p1 > 0:
+                                print(f"    -> Order 1: {q1} qty at {p1:,}")
+                                client.place_order(code, q1, p1, "SELL")
+                             if q2 > 0 and p2 > 0:
+                                print(f"    -> Order 2: {q2} qty at {p2:,}")
+                                client.place_order(code, q2, p2, "SELL")
+                             if q3 > 0 and p3 > 0:
+                                print(f"    -> Order 3: {q3} qty at {p3:,}")
+                                client.place_order(code, q3, p3, "SELL")
+                
+                # 2. Execute BUYS (with Clamp Check)
+                if args.buy and planned_buys:
+                    print("\n--- Processing BUY Orders ---")
+                    
+                    # NOTE: We do NOT add sold amount to current_cash immediately because settlement takes time (D+2),
+                    # unless it's a proxy margin account or the API updates 'ord_psbl_cash' immediately.
+                    # For safety, we only use what the API reported + whatever we know is safe.
+                    # Actually, for most accounts, you can buy with today's sell proceeds. 
+                    # KIS API 'ord_psbl_cash' typically reflects real-time ability including sells.
+                    # But since we fetched it BEFORE sells, we might need to refetch or manually add?
+                    # **Correct approach**: Refetch cash after sells? 
+                    # Or just assume the initial check and whatever was there.
+                    # Let's Refetch for maximum safety if sells happened.
+                    
+                    if args.sell and planned_sells:
+                         print("  (Refetching available cash after sells...)")
+                         try:
+                             new_cash = client.get_buyable_cash()
+                             print(f"  Updated Orderable Cash: {new_cash:,} KRW")
+                             current_cash = new_cash
+                         except Exception:
+                             pass
+                    
+                    for order in planned_buys:
+                        code = order['code']
+                        name = order['name']
+                        qty = order['qty']
+                        # price = order['price']
+                        bid_price = order['bid_price']
+                        asking_output = order['asking_output']
+                        asking_output2 = order['asking_output2']
+                        
+                        curr_prc = 0
+                        try:
+                            curr_prc = int(asking_output2.get('stck_prpr'))
+                        except (KeyError, ValueError, TypeError): 
+                            curr_prc = bid_price
+
+                        # Check Safety
+                        # Calculate estimated total cost for this stock
+                        # (using simple price * qty, ignoring split nuances for check)
+                        
+                        # --- CLAMP LOGIC ---
+                        # We calculate the max qty we can afford with current_cash
+                        # Max Qty = current_cash // price
+                        # If planned qty > Max Qty -> Reduce it.
+                        
+                        check_price = curr_prc if curr_prc > 0 else bid_price
+                        if check_price == 0: check_price = 1 # Avoid div by zero
+                        
+                        max_qty = int(current_cash // check_price)
+                        
+                        if qty > max_qty:
+                            print(f"  [Limit] Insufficient Cash ({current_cash:,}). Reducing {name} qty from {qty} to {max_qty}...")
+                            qty = max_qty
+                            
+                        if qty <= 0:
+                            print(f"  [Skip] Skipping {name} due to insufficient cash (Qty=0).")
+                            continue
+                            
+                        # Deduct estimated cost from local tracking (so next buy doesn't fail)
+                        estimated_cost = qty * check_price
+                        current_cash -= estimated_cost # Decrement safely
+                        # -------------------
+
+                        if args.mode == 'market': # Market Buy
+                             buy_qty = qty
+                             if buy_qty > 0:
+                                 print(f"  [EXEC] [Market-Buy] Buying {name} ({code}) {buy_qty} qty at Recent Price {curr_prc:,}...")
+                                 client.place_order(code, buy_qty, curr_prc, "BUY")
+                        
+                        elif args.mode == 'split': # Split Buy (33/33/34 at Bid 1/2/3)
+                            if qty > 0:
+                                print(f"  [EXEC] [Split-Buy] Buying {name} ({code}) {qty} qty...")
+                                
+                                q1 = int(qty * 0.33)
+                                q2 = int(qty * 0.33)
+                                q3 = qty - q1 - q2
+                                
+                                p1 = bid_price # bidp1
+                                p2 = int(asking_output.get('bidp2', 0))
+                                p3 = int(asking_output.get('bidp3', 0))
+                                
+                                # Sub-order Cash Check?
+                                # We already checked total qty vs price. But Split uses different (lower) prices usually, so it's safe.
+                                # However, strictly, p1/p2/p3 might be different. 
+                                # Since we used 'curr_prc' or 'bid_price' (highest) for check, we are likely safe.
+                                
+                                if q1 > 0 and p1 > 0:
+                                    print(f"    -> Order 1: {q1} qty at {p1:,}")
+                                    client.place_order(code, q1, p1, "BUY")
+                                if q2 > 0 and p2 > 0:
+                                    print(f"    -> Order 2: {q2} qty at {p2:,}")
+                                    client.place_order(code, q2, p2, "BUY")
+                                if q3 > 0 and p3 > 0:
+                                    print(f"    -> Order 3: {q3} qty at {p3:,}")
+                                    client.place_order(code, q3, p3, "BUY")
 
         # Open Orders
         print("\nFetching Open Orders...")

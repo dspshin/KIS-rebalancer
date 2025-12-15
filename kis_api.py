@@ -429,3 +429,45 @@ class KISClient:
                 return data_p
             
         return data
+
+    def get_buyable_cash(self):
+        """
+        Fetch orderable cash amount (Available for Buying).
+        TR_ID: TTTC8908R (Real) / VTTC8908R (Virtual)
+        """
+        if not self.access_token:
+            self.get_access_token()
+
+        path = "/uapi/domestic-stock/v1/trading/inquire-psbl-order"
+        url = f"{self.base_url}{path}"
+        
+        is_virtual = "openapivts" in self.base_url
+        tr_id = "VTTC8908R" if is_virtual else "TTTC8908R"
+
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret,
+            "tr_id": tr_id
+        }
+        
+        # We need a dummy code to check general buyable amount, but it might vary by stock (margin rate).
+        # However, for 100% cash accounts, it should be similar. 
+        # Using Samsung Elec (005930) as a safe standard reference.
+        params = {
+            "CANO": self.cano,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "PDNO": "005930", 
+            "ORD_UNPR": "0",
+            "ORD_DVSN": "02", # Market
+            "CMA_EVLU_AMT_ICLD_YN": "Y",
+            "OVRS_ICLD_YN": "Y"
+        }
+        
+        res = self._send_request('GET', url, headers, params=params)
+        
+        # Parse output
+        output = res.get('output', {})
+        # ord_psbl_cash: 주문가능현금
+        return int(output.get('ord_psbl_cash', 0))
