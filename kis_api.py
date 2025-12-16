@@ -467,7 +467,12 @@ class KISClient:
         
         res = self._send_request('GET', url, headers, params=params)
         
-        # Parse output
         output = res.get('output', {})
-        # ord_psbl_cash: 주문가능현금
+        # ord_psbl_cash: 주문가능현금 (증거금률에 따라 미수 포함 가능)
+        # nrcwb_buy_amt: 미수없는 매수금액 (순수 현금 100% 주문 가능액)
+        nrcwb = int(output.get('nrcwb_buy_amt', 0))
+        if nrcwb > 0:
+            return nrcwb
+            
+        # Fallback if nrcwb is 0 (though unlikely for valid response)
         return int(output.get('ord_psbl_cash', 0))
