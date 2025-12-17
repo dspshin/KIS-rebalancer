@@ -139,6 +139,33 @@ def main():
         print("Authenticating...")
         client.get_access_token()
         
+        # [NEW] Auto-Cancel Open Orders if Trading Mode
+        if args.buy or args.sell:
+            print("\n[Open Orders Check]")
+            try:
+                open_orders_data = client.get_open_orders()
+                # Parse list
+                open_orders = open_orders_data.get('output1') or open_orders_data.get('output', [])
+                
+                if open_orders:
+                    print(f" -> Found {len(open_orders)} open orders. Cancelling all...")
+                    for order in open_orders:
+                        # Depending on API, we need 'odno' or 'orgn_odno'
+                        # Usually 'odno' in the list becomes 'orgn_odno' for cancellation
+                        order_no = order.get('odno')
+                        if order_no:
+                            print(f"    Cancelling Order {order_no} ({order.get('prdt_name')})...")
+                            client.cancel_order(order_no)
+                    
+                    import time
+                    print(" -> Waiting 2 seconds for cancellation...")
+                    time.sleep(2)
+                else:
+                    print(" -> No open orders found.")
+            except Exception as e:
+                print(f" -> Warning: Failed to check/cancel open orders: {e}")
+            print("") # Newline
+        
         print("Fetching Balance...")
         balance_data = client.get_balance()
         
