@@ -9,6 +9,34 @@ from kis_api import KISClient
 from tabulate import tabulate
 
 import argparse
+import unicodedata
+
+def get_display_width(s):
+    """
+    Calculate the display width of a string (East Asian Width).
+    Wide/Full-width/Wide-Alpha count as 2, others as 1.
+    """
+    width = 0
+    for char in s:
+        if unicodedata.east_asian_width(char) in ('F', 'W', 'A'):
+            width += 2
+        else:
+            width += 1
+    return width
+
+def truncate_name(name, max_width=20):
+    """
+    Truncate string to max_width (visual width).
+    """
+    current_width = 0
+    result = ""
+    for char in name:
+        char_width = 2 if unicodedata.east_asian_width(char) in ('F', 'W', 'A') else 1
+        if current_width + char_width > max_width:
+            return result + ".."
+        result += char
+        current_width += char_width
+    return result
 
 def load_portfolio(filepath="portfolio.yaml"):
     if not os.path.exists(filepath):
@@ -211,7 +239,7 @@ def main():
                 # Filter out empty holdings if necessary
                 if int(item['hldg_qty']) > 0:
                     code = item['pdno']
-                    name = item['prdt_name']
+                    name = truncate_name(item['prdt_name'])
                     qty = int(item['hldg_qty'])
                     cur_price = int(item['prpr'])
                     evlu_amt = float(item['evlu_amt'])
@@ -251,7 +279,7 @@ def main():
             
             for target in targets:
                 code = str(target['code'])
-                name = target['name']
+                name = truncate_name(target['name'])
                 target_portion = float(target['portion'])
                 
                 target_amt = total_asset * target_portion
@@ -446,16 +474,16 @@ def main():
                         max_qty = int(current_cash // check_price)
                         
                         if qty > max_qty:
-                            print(f"  [Limit] Insufficient Cash ({current_cash:,}). Reducing {name} qty from {qty} to {max_qty}...")
-                            qty = max_qty
+                            print(f"  [Warning] Local cash check failed (Avail: {current_cash:,}, Needed: ~{qty*check_price:,}). Proceeding to utilize unsettled funds/deposits...")
+                            # qty = max_qty # DISABLED: Allow Buy
                             
                         if qty <= 0:
-                            print(f"  [Skip] Skipping {name} due to insufficient cash (Qty=0).")
+                            print(f"  [Skip] Skipping {name} due to calculated Qty=0.")
                             continue
                             
-                        # Deduct estimated cost from local tracking (so next buy doesn't fail)
+                        # Deduct estimated cost from local tracking (so next buy knows we are borrowing deeper)
                         estimated_cost = qty * check_price
-                        current_cash -= estimated_cost # Decrement safely
+                        current_cash -= estimated_cost # Decrement safely (can go negative)
                         # -------------------
 
                         if args.mode == 'market': # Market Buy
