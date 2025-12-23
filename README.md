@@ -99,6 +99,23 @@ python main.py [options]
 | **매수만 실행**<br>(분할) | `python main.py --buy` | 리밸런싱 결과 '매수'가 필요한 종목만 **3분할** 주문합니다. |
 | **ISA 계좌 전체 매매** | `python main.py --portfolio portfolio_isa.yaml --buy --sell` | ISA 포트폴리오를 기준으로 매수/매도 주문을 모두 실행합니다. |
 
+## 웹 대시보드 (Streamlit Dashboard) [NEW]
+터미널이 아닌 **웹 브라우저**에서 시각적으로 포트폴리오를 관리할 수 있습니다.
+
+### 실행 방법
+```bash
+python -m streamlit run app.py
+```
+실행 후 브라우저가 자동으로 열리며, 로컬 주소(예: `http://localhost:8501`)로 접속됩니다.
+
+### 주요 기능
+- **시각화**: 자산 구성(Pie Chart), 보유 목록 현황판.
+- **인터랙티브 테이블**: 목표 비중과 괴리율을 색상으로 구분하여 표시.
+- **GUI 실행**: 복잡한 명령어 입력 없이 버튼 클릭만으로 `Buy/Sell` 실행 가능.
+- **실시간 로그**: 실행 결과가 터미널에 실시간으로 출력됩니다.
+
+> **Note**: `Streamlit` 실행 시에도 `portfolio.yaml`의 설정과 `.env`의 인증 정보를 그대로 사용합니다.
+
 ## 자동 매매 로직 (Auto Trading Logic)
 
 ### 1. 분할 매매 전략 (Split Strategy) - Default

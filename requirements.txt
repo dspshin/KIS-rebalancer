@@ -2,3 +2,6 @@ requests
 python-dotenv
 tabulate
 PyYAML
+streamlit
+pandas
+plotly
