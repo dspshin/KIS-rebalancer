@@ -116,6 +116,22 @@ python -m streamlit run app.py
 
 > **Note**: `Streamlit` 실행 시에도 `portfolio.yaml`의 설정과 `.env`의 인증 정보를 그대로 사용합니다.
 
+### 백테스트 시뮬레이션 (Backtest) [NEW]
+과거 데이터를 기반으로 현재 포트폴리오의 성과를 시뮬레이션할 수 있습니다.
+- **기간 설정**: 1년, 3년, 5년 중 선택.
+- **리밸런싱 주기**:
+  - `2 Weeks`: 2주마다
+  - `Monthly`: 매월 말일 (Default)
+  - `2 Months`: 2개월마다
+  - `3 Months`: 분기마다
+- **데이터 처리**:
+  - `FinanceDataReader`를 사용하여 KRX/Yahoo 금융 데이터를 수집합니다.
+  - 구성 종목 중 **가장 늦게 상장된 종목의 시작일**을 기준으로 전체 테스트 기간을 자동 조정하여 데이터 왜곡을 방지합니다.
+- **시각화**:
+  - 포트폴리오 누적 수익률 그래프 (Plotly Interactive Chart)
+  - 개별 종목 성과 비교
+  - CAGR(연평균 성장률), MDD(최대 낙폭) 지표 제공
+
 ## 자동 매매 로직 (Auto Trading Logic)
 
 ### 1. 분할 매매 전략 (Split Strategy) - Default

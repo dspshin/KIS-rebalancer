@@ -5,3 +5,4 @@ PyYAML
 streamlit
 pandas
 plotly
+finance-datareader

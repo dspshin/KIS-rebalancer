@@ -227,3 +227,77 @@ if selected_file:
             
         else:
             st.warning("No rebalancing targets found in portfolio file.")
+
+    # 5. Backtest Tab
+    st.divider()
+    st.header("📊 Backtest Simulation")
+
+    with st.expander("Backtest Configuration", expanded=True):
+        bt_col1, bt_col2, bt_col3 = st.columns(3)
+        bt_years = bt_col1.selectbox("Period", [1, 3, 5], index=1, format_func=lambda x: f"{x} Year(s)")
+        
+        freq_map = {
+            "2 Weeks": "2W-FRI",
+            "Monthly (End)": "ME", 
+            "2 Months (End)": "2ME", 
+            "3 Months (End)": "3ME"
+        }
+        bt_freq_label = bt_col2.selectbox("Rebalancing Interval", list(freq_map.keys()), index=1)
+        bt_freq = freq_map[bt_freq_label]
+        
+        # bt_col3.info(f"Strategy: {bt_freq_label} Rebalancing")
+        
+        run_bt = st.button("Run Backtest")
+
+    if run_bt:
+        from backtest_logic import fetch_history, calculate_portfolio_performance
+        
+        # Prepare targets
+        targets = load_portfolio(selected_file)
+        if not targets:
+            st.warning("No targets to backtest.")
+        else:
+            codes = [str(t['code']) for t in targets]
+            
+            with st.spinner("Fetching historical data..."):
+                prices_df, start_date = fetch_history(codes, years=bt_years)
+                
+            if prices_df is None or prices_df.empty:
+                st.error("Failed to fetch historical data. Some symbols (e.g. Gold) might fail with public Yahoo data.")
+            else:
+                # Calculate
+                results, cagr, mdd, total_ret = calculate_portfolio_performance(prices_df, targets, rebalance_freq=bt_freq)
+                
+                if results is not None:
+                    # Metrics
+                    m_col1, m_col2, m_col3 = st.columns(3)
+                    m_col1.metric("CAGR", f"{cagr*100:.2f}%")
+                    m_col2.metric("Max Drawdown (MDD)", f"{mdd*100:.2f}%")
+                    m_col3.metric("Total Return", f"{total_ret*100:.2f}%")
+                    
+                    st.success(f"Backtest Period: {start_date.strftime('%Y-%m-%d')} ~ {prices_df.index[-1].strftime('%Y-%m-%d')}")
+                    if start_date.year > (pd.Timestamp.today() - pd.DateOffset(years=bt_years)).year:
+                         st.warning("⚠️ Note: Backtest start date was adjusted due to data availability (some ETFs were listed later).")
+
+                    # Chart
+                    # Use Plotly for custom axis formatting
+                    fig_perf = px.line(results, y='Portfolio', title='Portfolio Cumulative Return')
+                    fig_perf.update_xaxes(
+                        tickformat="%Y-%m",
+                        dtick="M1" if bt_years == 1 else "M3" # Adjust density based on duration
+                    )
+                    st.plotly_chart(fig_perf, use_container_width=True)
+                    
+                    # Individual Assets (Optional)
+                    with st.expander("Show Individual Assets Performance"):
+                         # Rename columns for display: Code -> Name
+                         ind_df = results.drop(columns=['Portfolio'])
+                         
+                         name_map = { str(t['code']): t['name'] for t in targets }
+                         ind_df.rename(columns=name_map, inplace=True)
+                         
+                         fig_ind = px.line(ind_df)
+                         fig_ind.update_xaxes(tickformat="%Y-%m")
+                         st.plotly_chart(fig_ind, use_container_width=True)
+                else:
+                    st.error("Simulation failed.")
