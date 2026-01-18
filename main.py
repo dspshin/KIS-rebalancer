@@ -183,9 +183,11 @@ def get_rebalancing_plan(client, portfolio_file, total_asset, holdings):
         return []
         
     plan_data = []
+    processed_codes = set()
     
     for target in targets:
         code = str(target['code'])
+        processed_codes.add(code)
         name = target['name'] # Keep full name
         target_portion = float(target['portion'])
         
@@ -237,6 +239,46 @@ def get_rebalancing_plan(client, portfolio_file, total_asset, holdings):
             'diff': diff,
             'action': action,
             'qty': qty_diff,
+            'est_price': est_price,
+            'bid_price': bid_price,
+            'ask_price': ask_price,
+            'asking_output': asking_output,
+            'asking_output2': asking_output2
+        })
+        
+    # 4. Handle Surplus Holdings (Not in Portfolio) -> SELL ALL
+    for code, holding in current_holdings.items():
+        if code in processed_codes:
+            continue
+            
+        name = holding['name']
+        current_amt = holding['evlu_amt']
+        holding_qty = holding['qty']
+        
+        # Market Data
+        asking_data = client.get_asking_price(code)
+        asking_output = asking_data.get('output1', {})
+        asking_output2 = asking_data.get('output2', {})
+        
+        bid_price = int(asking_output.get('bidp1', 0))
+        ask_price = int(asking_output.get('askp1', 0))
+        cur_price = int(asking_output2.get('stck_prpr', 0))
+        if cur_price == 0:
+             cur_price = int(asking_output.get('stck_prpr', 0))
+             
+        est_price = cur_price
+        if est_price == 0 and bid_price > 0:
+            est_price = bid_price
+            
+        plan_data.append({
+            'code': code,
+            'name': name,
+            'target_portion': 0.0,
+            'target_amt': 0.0,
+            'current_amt': current_amt,
+            'diff': -current_amt,
+            'action': "SELL",
+            'qty': holding_qty,
             'est_price': est_price,
             'bid_price': bid_price,
             'ask_price': ask_price,
